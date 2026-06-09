@@ -6,6 +6,7 @@ export default function App() {
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
   const [item, setItem] = useState('')
+  const [quantidade, setQuantidade] = useState('')
   const [compras, setCompras] = useState([])
 
   useEffect(() => {
@@ -60,14 +61,19 @@ export default function App() {
   async function adicionarItem() {
     if (!item.trim()) return
 
+    let qty = parseInt(quantidade, 10)
+    if (!Number.isFinite(qty) || qty <= 0) qty = 1
+
     const { error } = await supabase.from('compras').insert({
       item,
+      quantidade: qty,
       user_id: session.user.id,
     })
 
     if (error) alert(error.message)
     else {
       setItem('')
+      setQuantidade('')
       carregarCompras()
     }
   }
@@ -133,16 +139,27 @@ export default function App() {
 
       <hr />
 
-      <input
-        placeholder="Digite um item"
-        value={item}
-        onChange={(e) => setItem(e.target.value)}
-        style={{ width: '70%', padding: 10 }}
-      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <input
+          placeholder="Digite um item"
+          value={item}
+          onChange={(e) => setItem(e.target.value)}
+          style={{ flex: 1, padding: 10 }}
+        />
 
-      <button onClick={adicionarItem} style={{ marginLeft: 10 }}>
-        Adicionar
-      </button>
+        <input
+          placeholder="Quantidade"
+          type="number"
+          min={1}
+          value={quantidade}
+          onChange={(e) => setQuantidade(e.target.value)}
+          style={{ width: 100, padding: 10 }}
+        />
+
+        <button onClick={adicionarItem}>
+          Adicionar
+        </button>
+      </div>
 
       <ul>
         {compras.map((compra) => (
@@ -155,6 +172,9 @@ export default function App() {
               }}
             >
               {compra.item}
+              <span style={{ fontSize: 12, color: '#666', marginLeft: 8 }}>
+                ({compra.quantidade ?? 1})
+              </span>
             </span>
 
             <button
