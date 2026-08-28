@@ -729,9 +729,12 @@ export default function App() {
               Item da lista
               <select value={quoteForm.shopping_item_id} onChange={(event) => setQuoteForm({ ...quoteForm, shopping_item_id: event.target.value })}>
                 <option value="">Selecione</option>
-                {enrichedItems.filter((item) => item.status !== 'purchased').map((item) => (
-                  <option key={item.id} value={item.id}>{item.product?.name} ({item.quotes.length}/3)</option>
-                ))}
+                {[...enrichedItems]
+                  .filter((item) => item.status !== 'purchased')
+                  .sort((a, b) => (a.product?.name || '').localeCompare(b.product?.name || ''))
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>{item.product?.name} ({item.quotes.length}/3)</option>
+                  ))}
               </select>
             </label>
             <label>Estabelecimento<input value={quoteForm.establishment} onChange={(event) => setQuoteForm({ ...quoteForm, establishment: event.target.value })} placeholder="Mercado ou loja online" /></label>
