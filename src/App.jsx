@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './supabaseClient'
 
+const LOCAL_COMPRAS_KEY = 'compras:test-items'
+const LOCAL_USER_ID = 'local-test-user'
+
 export default function App() {
   const [session, setSession] = useState(null)
   const [email, setEmail] = useState('')
@@ -10,6 +13,7 @@ export default function App() {
   const [preco2, setPreco2] = useState('')
   const [preco3, setPreco3] = useState('')
   const [compras, setCompras] = useState([])
+  const [erro, setErro] = useState('')
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -24,40 +28,114 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (session) carregarCompras()
+    if (!session) return
+
+    if (session.user.id === LOCAL_USER_ID) {
+      const saved = localStorage.getItem(LOCAL_COMPRAS_KEY)
+      queueMicrotask(() => {
+        setCompras(saved ? JSON.parse(saved) : [])
+      })
+      return
+    }
+
+    async function carregarComprasIniciais() {
+      try {
+        setErro('')
+        const { data, error } = await supabase
+          .from('compras')
+          .select('*')
+          .order('created_at', { ascending: false })
+
+        if (error) setErro(error.message)
+        else setCompras(data)
+      } catch {
+        setErro('Nao foi possivel carregar a lista. Confira a conexao com o Supabase.')
+      }
+    }
+
+    carregarComprasIniciais()
   }, [session])
 
-  async function cadastrar() {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password: import.meta.env.VITE_TEST_PASSWORD || 'compras123',
-    })
+  const isLocalSession = session?.user?.id === LOCAL_USER_ID
 
-    if (error) alert(error.message)
-    else alert('Cadastro criado. Verifique seu email se o Supabase pedir confirmação.')
+  function carregarComprasLocais() {
+    const saved = localStorage.getItem(LOCAL_COMPRAS_KEY)
+    setCompras(saved ? JSON.parse(saved) : [])
+  }
+
+  function salvarComprasLocais(nextCompras) {
+    localStorage.setItem(LOCAL_COMPRAS_KEY, JSON.stringify(nextCompras))
+    setCompras(nextCompras)
+  }
+
+  function entrarModoTeste() {
+    setSession({
+      user: {
+        id: LOCAL_USER_ID,
+        email: email || 'teste@local',
+      },
+    })
+  }
+
+  async function cadastrar() {
+    try {
+      setErro('')
+      const { error } = await supabase.auth.signUp({
+        email,
+        password: import.meta.env.VITE_TEST_PASSWORD || 'compras123',
+      })
+
+      if (error) setErro(error.message)
+      else alert('Cadastro criado. Verifique seu email se o Supabase pedir confirmação.')
+    } catch {
+      setErro('Supabase indisponivel. Voce entrou em modo teste local.')
+      entrarModoTeste()
+    }
   }
 
   async function entrar() {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password: import.meta.env.VITE_TEST_PASSWORD || 'compras123',
-    })
+    try {
+      setErro('')
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password: import.meta.env.VITE_TEST_PASSWORD || 'compras123',
+      })
 
-    if (error) alert(error.message)
+      if (error) setErro(error.message)
+    } catch {
+      setErro('Supabase indisponivel. Voce entrou em modo teste local.')
+      entrarModoTeste()
+    }
   }
 
   async function sair() {
+    if (isLocalSession) {
+      setSession(null)
+      setCompras([])
+      return
+    }
+
     await supabase.auth.signOut()
   }
 
   async function carregarCompras() {
-    const { data, error } = await supabase
-      .from('compras')
-      .select('*')
-      .order('created_at', { ascending: false })
+    if (isLocalSession) {
+      carregarComprasLocais()
+      return
+    }
 
-    if (error) alert(error.message)
-    else setCompras(data)
+    try {
+      setErro('')
+      const { data, error } = await supabase
+        .from('compras')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (error) setErro(error.message)
+      else setCompras(data)
+    } catch {
+      setErro('Nao foi possivel carregar a lista. Confira a conexao com o Supabase.')
+    }
   }
 
   async function adicionarItem() {
@@ -74,54 +152,120 @@ export default function App() {
 
     const [price1, price2, price3] = prices
 
-    const { error } = await supabase.from('compras').insert({
-      item,
-      quantidade: qty,
-      preco_1: price1,
-      preco_2: price2,
-      preco_3: price3,
-      user_id: session.user.id,
-    })
-
-    if (error) alert(error.message)
-    else {
+    if (isLocalSession) {
+      salvarComprasLocais([
+        {
+          id: crypto.randomUUID(),
+          item,
+          quantidade: qty,
+          preco_1: price1,
+          preco_2: price2,
+          preco_3: price3,
+          comprado: false,
+          in_cart: false,
+          created_at: new Date().toISOString(),
+        },
+        ...compras,
+      ])
       setItem('')
       setQuantidade('')
       setPreco1('')
       setPreco2('')
       setPreco3('')
-      carregarCompras()
+      return
+    }
+
+    try {
+      setErro('')
+      const { error } = await supabase.from('compras').insert({
+        item,
+        quantidade: qty,
+        preco_1: price1,
+        preco_2: price2,
+        preco_3: price3,
+        user_id: session.user.id,
+      })
+
+      if (error) setErro(error.message)
+      else {
+        setItem('')
+        setQuantidade('')
+        setPreco1('')
+        setPreco2('')
+        setPreco3('')
+        carregarCompras()
+      }
+    } catch {
+      setErro('Nao foi possivel adicionar o item. Confira a conexao com o Supabase.')
     }
   }
 
   async function alternarComprado(compra) {
-    const { error } = await supabase
-      .from('compras')
-      .update({ comprado: !compra.comprado })
-      .eq('id', compra.id)
+    if (isLocalSession) {
+      salvarComprasLocais(
+        compras.map((item) =>
+          item.id === compra.id ? { ...item, comprado: !item.comprado } : item
+        )
+      )
+      return
+    }
 
-    if (error) alert(error.message)
-    else carregarCompras()
+    try {
+      setErro('')
+      const { error } = await supabase
+        .from('compras')
+        .update({ comprado: !compra.comprado })
+        .eq('id', compra.id)
+
+      if (error) setErro(error.message)
+      else carregarCompras()
+    } catch {
+      setErro('Nao foi possivel atualizar o item. Confira a conexao com o Supabase.')
+    }
   }
 
   async function alternarCarrinho(compra) {
-    const { error } = await supabase
-      .from('compras')
-      .update({ in_cart: !compra.in_cart })
-      .eq('id', compra.id)
+    if (isLocalSession) {
+      salvarComprasLocais(
+        compras.map((item) =>
+          item.id === compra.id ? { ...item, in_cart: !item.in_cart } : item
+        )
+      )
+      return
+    }
 
-    if (error) alert(error.message)
-    else carregarCompras()
+    try {
+      setErro('')
+      const { error } = await supabase
+        .from('compras')
+        .update({ in_cart: !compra.in_cart })
+        .eq('id', compra.id)
+
+      if (error) setErro(error.message)
+      else carregarCompras()
+    } catch {
+      setErro('Nao foi possivel atualizar o carrinho. Confira a conexao com o Supabase.')
+    }
   }
 
   async function excluirItem(id) {
-    const { error } = await supabase
-      .from('compras')
-      .delete()
-      .eq('id', id)
+    if (isLocalSession) {
+      salvarComprasLocais(compras.filter((item) => item.id !== id))
+      return
+    }
 
-    if (error) alert(error.message)
-    else carregarCompras()
+    try {
+      setErro('')
+      const { error } = await supabase
+        .from('compras')
+        .delete()
+        .eq('id', id)
+
+      if (error) setErro(error.message)
+      else carregarCompras()
+    } catch {
+      setErro('Nao foi possivel excluir o item. Confira a conexao com o Supabase.')
+    }
   }
 
   if (!session) {
@@ -135,6 +279,12 @@ export default function App() {
           onChange={(e) => setEmail(e.target.value)}
           style={{ display: 'block', width: '100%', marginBottom: 10, padding: 10 }}
         />
+
+        {erro && (
+          <p style={{ color: '#b00020', marginBottom: 10 }}>
+            {erro}
+          </p>
+        )}
 
         <button onClick={entrar} style={{ marginRight: 10 }}>
           Entrar
@@ -154,6 +304,12 @@ export default function App() {
       <p>Logado como: {session.user.email}</p>
 
       <button onClick={sair}>Sair</button>
+
+      {erro && (
+        <p style={{ color: '#b00020', marginTop: 10 }}>
+          {erro}
+        </p>
+      )}
 
       <hr />
 
