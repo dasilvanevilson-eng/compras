@@ -4,7 +4,6 @@ import { supabase } from './supabaseClient'
 export default function App() {
   const [session, setSession] = useState(null)
   const [email, setEmail] = useState('')
-  const [senha, setSenha] = useState('')
   const [item, setItem] = useState('')
   const [quantidade, setQuantidade] = useState('')
   const [preco1, setPreco1] = useState('')
@@ -31,7 +30,7 @@ export default function App() {
   async function cadastrar() {
     const { error } = await supabase.auth.signUp({
       email,
-      password: senha,
+      password: import.meta.env.VITE_TEST_PASSWORD || 'compras123',
     })
 
     if (error) alert(error.message)
@@ -41,7 +40,7 @@ export default function App() {
   async function entrar() {
     const { error } = await supabase.auth.signInWithPassword({
       email,
-      password: senha,
+      password: import.meta.env.VITE_TEST_PASSWORD || 'compras123',
     })
 
     if (error) alert(error.message)
@@ -134,14 +133,6 @@ export default function App() {
           placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          style={{ display: 'block', width: '100%', marginBottom: 10, padding: 10 }}
-        />
-
-        <input
-          placeholder="Senha"
-          type="password"
-          value={senha}
-          onChange={(e) => setSenha(e.target.value)}
           style={{ display: 'block', width: '100%', marginBottom: 10, padding: 10 }}
         />
 
