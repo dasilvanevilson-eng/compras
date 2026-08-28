@@ -811,7 +811,9 @@ export default function App() {
                   .filter((item) => item.status !== 'purchased')
                   .sort((a, b) => (a.product?.name || '').localeCompare(b.product?.name || ''))
                   .map((item) => (
-                    <option key={item.id} value={item.id}>{item.product?.name} ({item.quotes.length}/3)</option>
+                    <option key={item.id} value={item.id}>
+                      {item.product?.name} - {item.product?.unit || 'un'} ({item.quotes.length}/3)
+                    </option>
                   ))}
               </select>
             </label>
