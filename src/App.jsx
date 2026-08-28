@@ -137,10 +137,10 @@ function getRecommendation(item, quotes, product) {
     .filter((quote) => quote.shopping_item_id === item.id)
     .sort((a, b) => quoteEffectivePrice(a) - quoteEffectivePrice(b))
 
-  if (itemQuotes.length < 2) {
+  if (itemQuotes.length < 1) {
     return {
       status: 'missing',
-      message: `Faltam ${2 - itemQuotes.length} cotacao(oes)`,
+      message: 'Sem cotacao',
       quote: null,
       saving: 0,
     }
@@ -679,7 +679,7 @@ export default function App() {
     const product = data.products.find((entry) => entry.id === item.product_id)
     const recommendation = getRecommendation(item, data.quotes, product)
     if (!recommendation.quote) {
-      setError('Adicione pelo menos 2 cotacoes antes de registrar a compra.')
+      setError('Adicione pelo menos 1 cotacao antes de registrar a compra.')
       return
     }
 
@@ -770,7 +770,7 @@ export default function App() {
       <section className="summary-grid">
         <article className="summary-card"><span>Economia estimada</span><strong>{money(dashboard.totalSaving)}</strong></article>
         <article className="summary-card"><span>Itens para comprar</span><strong>{dashboard.pendingItems.length}</strong></article>
-        <article className="summary-card"><span>Sem cotacao suficiente</span><strong>{dashboard.missingQuotes.length}</strong></article>
+        <article className="summary-card"><span>Sem cotacao</span><strong>{dashboard.missingQuotes.length}</strong></article>
         <article className="summary-card"><span>Internet vantajosa</span><strong>{dashboard.onlineWins.length}</strong></article>
       </section>
 
