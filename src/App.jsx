@@ -174,6 +174,7 @@ export default function App() {
   const [notice, setNotice] = useState('')
   const [data, setData] = useState(EMPTY_STATE)
   const [editingItemId, setEditingItemId] = useState('')
+  const [editingQuoteId, setEditingQuoteId] = useState('')
   const [productForm, setProductForm] = useState({
     name: '',
     category: '',
@@ -498,7 +499,7 @@ export default function App() {
     if (!selectedItem) return
 
     const currentQuotes = data.quotes.filter((quote) => quote.shopping_item_id === quoteForm.shopping_item_id)
-    if (currentQuotes.length >= 3) {
+    if (!editingQuoteId && currentQuotes.length >= 3) {
       setError('Cada item pode ter no maximo 3 cotacoes ativas.')
       return
     }
@@ -516,6 +517,36 @@ export default function App() {
     }
     if (!quote.establishment || quote.price <= 0) return
 
+    if (editingQuoteId) {
+      const updatedQuote = { ...quote, id: editingQuoteId }
+
+      await saveData(
+        {
+          ...data,
+          quotes: data.quotes.map((entry) =>
+            entry.id === editingQuoteId ? updatedQuote : entry,
+          ),
+        },
+        () =>
+          supabase
+            .from('cotacoes')
+            .update({
+              shopping_item_id: updatedQuote.shopping_item_id,
+              establishment: updatedQuote.establishment,
+              price: updatedQuote.price,
+              shipping: updatedQuote.shipping,
+              source: updatedQuote.source,
+              quoted_at: updatedQuote.quoted_at,
+              note: updatedQuote.note,
+            })
+            .eq('id', updatedQuote.id),
+      )
+
+      setEditingQuoteId('')
+      resetQuoteForm()
+      return
+    }
+
     await saveData({ ...data, quotes: [quote, ...data.quotes] }, () => supabase.from('cotacoes').insert(quote))
     setQuoteForm({
       ...quoteForm,
@@ -524,6 +555,47 @@ export default function App() {
       shipping: '',
       note: '',
     })
+  }
+
+  function resetQuoteForm() {
+    setQuoteForm({
+      shopping_item_id: '',
+      establishment: '',
+      price: '',
+      shipping: '',
+      source: 'physical',
+      quoted_at: today(),
+      note: '',
+    })
+  }
+
+  function editQuote(quote) {
+    setEditingQuoteId(quote.id)
+    setQuoteForm({
+      shopping_item_id: quote.shopping_item_id,
+      establishment: quote.establishment,
+      price: quote.price,
+      shipping: quote.shipping || '',
+      source: quote.source,
+      quoted_at: quote.quoted_at || today(),
+      note: quote.note || '',
+    })
+    setActiveTab('cotacoes')
+  }
+
+  async function deleteQuote(quote) {
+    await saveData(
+      {
+        ...data,
+        quotes: data.quotes.filter((entry) => entry.id !== quote.id),
+      },
+      () => supabase.from('cotacoes').delete().eq('id', quote.id),
+    )
+
+    if (editingQuoteId === quote.id) {
+      setEditingQuoteId('')
+      resetQuoteForm()
+    }
   }
 
   async function addMarketAndCampaign(event) {
@@ -730,7 +802,7 @@ export default function App() {
       {activeTab === 'cotacoes' && (
         <section className="workspace">
           <form className="panel form-grid" onSubmit={addQuote}>
-            <h2>Nova cotacao</h2>
+            <h2>{editingQuoteId ? 'Editar cotacao' : 'Nova cotacao'}</h2>
             <label>
               Item da lista
               <select value={quoteForm.shopping_item_id} onChange={(event) => setQuoteForm({ ...quoteForm, shopping_item_id: event.target.value })}>
@@ -755,7 +827,19 @@ export default function App() {
             <label>Frete<input value={quoteForm.shipping} onChange={(event) => setQuoteForm({ ...quoteForm, shipping: event.target.value })} placeholder="0,00" disabled={quoteForm.source !== 'online'} /></label>
             <label>Data<input value={quoteForm.quoted_at} onChange={(event) => setQuoteForm({ ...quoteForm, quoted_at: event.target.value })} type="date" /></label>
             <label className="wide">Observacao<input value={quoteForm.note} onChange={(event) => setQuoteForm({ ...quoteForm, note: event.target.value })} placeholder="Campanha, app, atacado, cupom..." /></label>
-            <button type="submit">Salvar cotacao</button>
+            <button type="submit">{editingQuoteId ? 'Salvar alteracoes' : 'Salvar cotacao'}</button>
+            {editingQuoteId && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  setEditingQuoteId('')
+                  resetQuoteForm()
+                }}
+              >
+                Cancelar edicao
+              </button>
+            )}
           </form>
 
           <section className="panel">
@@ -769,6 +853,10 @@ export default function App() {
                     <div key={quote.id} className={index === 0 ? 'quote best' : 'quote'}>
                       <div><strong>{quote.establishment}</strong><p>{quote.source === 'online' ? 'Internet' : 'Fisico'} | {quote.note || 'sem observacao'}</p></div>
                       <strong>{money(quoteEffectivePrice(quote))}</strong>
+                      <div className="quote-actions">
+                        <button type="button" className="secondary" onClick={() => editQuote(quote)}>Editar</button>
+                        <button type="button" className="danger" onClick={() => deleteQuote(quote)}>Excluir</button>
+                      </div>
                     </div>
                   ))}
                 </article>

@@ -295,10 +295,19 @@ input:disabled {
 }
 
 .quote {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   margin-top: 8px;
   padding: 10px;
   border-radius: 8px;
   background: var(--surface);
+}
+
+.quote-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .quote.best {
