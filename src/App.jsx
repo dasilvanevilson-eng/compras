@@ -170,6 +170,7 @@ export default function App() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [data, setData] = useState(EMPTY_STATE)
+  const [editingItemId, setEditingItemId] = useState('')
   const [productForm, setProductForm] = useState({
     name: '',
     category: '',
@@ -360,6 +361,58 @@ export default function App() {
     const name = normalizeText(productForm.name)
     if (!name) return
 
+    if (editingItemId) {
+      const currentItem = data.shoppingItems.find((item) => item.id === editingItemId)
+      if (!currentItem) return
+
+      const updatedProduct = {
+        ...data.products.find((product) => product.id === currentItem.product_id),
+        name,
+        category: normalizeText(productForm.category) || 'Geral',
+        last_price: toNumber(productForm.last_price),
+        last_store: normalizeText(productForm.last_store),
+        last_purchase_date: productForm.last_purchase_date || null,
+      }
+      const updatedItem = {
+        ...currentItem,
+        quantity: Math.max(1, toNumber(productForm.quantity, 1)),
+      }
+
+      await saveData(
+        {
+          ...data,
+          products: data.products.map((product) =>
+            product.id === updatedProduct.id ? updatedProduct : product,
+          ),
+          shoppingItems: data.shoppingItems.map((item) =>
+            item.id === editingItemId ? updatedItem : item,
+          ),
+        },
+        async () => {
+          const productUpdate = await supabase
+            .from('produtos')
+            .update({
+              name: updatedProduct.name,
+              category: updatedProduct.category,
+              last_price: updatedProduct.last_price,
+              last_store: updatedProduct.last_store,
+              last_purchase_date: updatedProduct.last_purchase_date,
+            })
+            .eq('id', updatedProduct.id)
+
+          if (productUpdate.error) return productUpdate
+          return supabase
+            .from('lista_compras')
+            .update({ quantity: updatedItem.quantity })
+            .eq('id', updatedItem.id)
+        },
+      )
+
+      resetProductForm()
+      setEditingItemId('')
+      return
+    }
+
     const product = {
       id: makeId(),
       name,
@@ -388,7 +441,47 @@ export default function App() {
       },
     )
 
+    resetProductForm()
+  }
+
+  function resetProductForm() {
     setProductForm({ name: '', category: '', quantity: 1, last_price: '', last_store: '', last_purchase_date: today() })
+  }
+
+  function editShoppingItem(item) {
+    const product = data.products.find((entry) => entry.id === item.product_id)
+    if (!product) return
+
+    setEditingItemId(item.id)
+    setProductForm({
+      name: product.name,
+      category: product.category,
+      quantity: item.quantity,
+      last_price: product.last_price || '',
+      last_store: product.last_store || '',
+      last_purchase_date: product.last_purchase_date || today(),
+    })
+    setActiveTab('lista')
+  }
+
+  async function deleteShoppingItem(item) {
+    const nextData = {
+      ...data,
+      shoppingItems: data.shoppingItems.filter((entry) => entry.id !== item.id),
+      quotes: data.quotes.filter((quote) => quote.shopping_item_id !== item.id),
+      purchases: data.purchases.map((purchase) =>
+        purchase.shopping_item_id === item.id ? { ...purchase, shopping_item_id: null } : purchase,
+      ),
+    }
+
+    await saveData(nextData, async () => {
+      return supabase.from('lista_compras').delete().eq('id', item.id)
+    })
+
+    if (editingItemId === item.id) {
+      resetProductForm()
+      setEditingItemId('')
+    }
   }
 
   async function addQuote(event) {
@@ -567,14 +660,26 @@ export default function App() {
       {activeTab === 'lista' && (
         <section className="workspace">
           <form className="panel form-grid" onSubmit={addProductToList}>
-            <h2>Novo item</h2>
+            <h2>{editingItemId ? 'Editar item' : 'Novo item'}</h2>
             <label>Produto<input value={productForm.name} onChange={(event) => setProductForm({ ...productForm, name: event.target.value })} placeholder="Ex.: Arroz 5 kg" /></label>
             <label>Categoria<input value={productForm.category} onChange={(event) => setProductForm({ ...productForm, category: event.target.value })} placeholder="Mercearia, limpeza..." /></label>
             <label>Quantidade<input value={productForm.quantity} min="1" onChange={(event) => setProductForm({ ...productForm, quantity: event.target.value })} type="number" /></label>
             <label>Ultimo preco pago<input value={productForm.last_price} onChange={(event) => setProductForm({ ...productForm, last_price: event.target.value })} placeholder="0,00" /></label>
             <label>Ultimo estabelecimento<input value={productForm.last_store} onChange={(event) => setProductForm({ ...productForm, last_store: event.target.value })} placeholder="Mercado onde comprou" /></label>
             <label>Data da ultima compra<input value={productForm.last_purchase_date} onChange={(event) => setProductForm({ ...productForm, last_purchase_date: event.target.value })} type="date" /></label>
-            <button type="submit">Adicionar a lista</button>
+            <button type="submit">{editingItemId ? 'Salvar alteracoes' : 'Adicionar a lista'}</button>
+            {editingItemId && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  resetProductForm()
+                  setEditingItemId('')
+                }}
+              >
+                Cancelar edicao
+              </button>
+            )}
           </form>
 
           <section className="panel">
@@ -588,7 +693,11 @@ export default function App() {
                     <p>{item.quantity} un. | Ultimo: {money(item.product?.last_price)} em {item.product?.last_store || 'sem registro'}</p>
                   </div>
                   <span className={`pill ${item.recommendation.status}`}>{item.recommendation.message}</span>
-                  {item.recommendation.status === 'ready' && <button type="button" onClick={() => markPurchased(item)}>Registrar compra</button>}
+                  <div className="card-actions">
+                    <button type="button" className="secondary" onClick={() => editShoppingItem(item)}>Editar</button>
+                    <button type="button" className="danger" onClick={() => deleteShoppingItem(item)}>Excluir</button>
+                    {item.recommendation.status === 'ready' && <button type="button" onClick={() => markPurchased(item)}>Registrar compra</button>}
+                  </div>
                 </article>
               ))}
             </div>

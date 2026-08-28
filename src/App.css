@@ -126,6 +126,12 @@ button.secondary,
   border: 1px solid var(--border);
 }
 
+button.danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger), var(--border) 45%);
+}
+
 .tabbar button.active {
   background: var(--text);
   border-color: var(--text);
@@ -248,8 +254,14 @@ input:disabled {
   align-items: center;
 }
 
-.shopping-card button {
+.shopping-card .card-actions {
   grid-column: 1 / -1;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .pill {
