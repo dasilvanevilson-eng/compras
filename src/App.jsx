@@ -176,6 +176,7 @@ export default function App() {
   const [editingItemId, setEditingItemId] = useState('')
   const [editingQuoteId, setEditingQuoteId] = useState('')
   const [productForm, setProductForm] = useState({
+    selectedProductId: '',
     name: '',
     category: '',
     unit: 'un',
@@ -420,6 +421,29 @@ export default function App() {
       return
     }
 
+    const selectedProduct = data.products.find(
+      (product) => product.id === productForm.selectedProductId,
+    )
+
+    if (selectedProduct) {
+      const item = {
+        id: makeId(),
+        product_id: selectedProduct.id,
+        quantity: Math.max(1, toNumber(productForm.quantity, 1)),
+        status: 'pending',
+        user_id: session.user.id,
+        created_at: new Date().toISOString(),
+      }
+
+      await saveData(
+        { ...data, shoppingItems: [item, ...data.shoppingItems] },
+        () => supabase.from('lista_compras').insert(item),
+      )
+
+      resetProductForm()
+      return
+    }
+
     const product = {
       id: makeId(),
       name,
@@ -453,7 +477,7 @@ export default function App() {
   }
 
   function resetProductForm() {
-    setProductForm({ name: '', category: '', unit: 'un', quantity: 1, last_price: '', last_store: '', last_purchase_date: today() })
+    setProductForm({ selectedProductId: '', name: '', category: '', unit: 'un', quantity: 1, last_price: '', last_store: '', last_purchase_date: today() })
   }
 
   function editShoppingItem(item) {
@@ -462,6 +486,7 @@ export default function App() {
 
     setEditingItemId(item.id)
     setProductForm({
+      selectedProductId: '',
       name: product.name,
       category: product.category,
       unit: product.unit || 'un',
@@ -471,6 +496,25 @@ export default function App() {
       last_purchase_date: product.last_purchase_date || today(),
     })
     setActiveTab('lista')
+  }
+
+  function selectKnownProduct(productId) {
+    const product = data.products.find((entry) => entry.id === productId)
+    if (!product) {
+      resetProductForm()
+      return
+    }
+
+    setProductForm({
+      selectedProductId: product.id,
+      name: product.name,
+      category: product.category,
+      unit: product.unit || 'un',
+      quantity: 1,
+      last_price: product.last_price || '',
+      last_store: product.last_store || '',
+      last_purchase_date: product.last_purchase_date || today(),
+    })
   }
 
   async function deleteShoppingItem(item) {
@@ -747,6 +791,24 @@ export default function App() {
         <section className="workspace">
           <form className="panel form-grid" onSubmit={addProductToList}>
             <h2>{editingItemId ? 'Editar item' : 'Novo item'}</h2>
+            {!editingItemId && data.products.length > 0 && (
+              <label className="wide">
+                Produto ja cadastrado
+                <select
+                  value={productForm.selectedProductId}
+                  onChange={(event) => selectKnownProduct(event.target.value)}
+                >
+                  <option value="">Cadastrar novo produto</option>
+                  {[...data.products]
+                    .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+                    .map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {product.name} - {product.unit || 'un'} | ultimo {money(product.last_price)}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )}
             <label>Produto<input value={productForm.name} onChange={(event) => setProductForm({ ...productForm, name: event.target.value })} placeholder="Ex.: Arroz 5 kg" /></label>
             <label>Categoria<input value={productForm.category} onChange={(event) => setProductForm({ ...productForm, category: event.target.value })} placeholder="Mercearia, limpeza..." /></label>
             <label>
