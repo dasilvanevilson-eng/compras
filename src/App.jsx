@@ -1,27 +1,269 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import './App.css'
 import { supabase } from './supabaseClient'
 
-const LOCAL_COMPRAS_KEY = 'compras:test-items'
+const LOCAL_STATE_KEY = 'compras:intelligent-state'
 const LOCAL_USER_ID = 'local-test-user'
+const TEST_PASSWORD = import.meta.env.VITE_TEST_PASSWORD || 'compras123'
+
+const DAYS = ['Domingo', 'Segunda', 'Terca', 'Quarta', 'Quinta', 'Sexta', 'Sabado']
+
+const EMPTY_STATE = {
+  supermarkets: [],
+  products: [],
+  shoppingItems: [],
+  quotes: [],
+  campaigns: [],
+  purchases: [],
+}
+
+const SAMPLE_STATE = {
+  supermarkets: [
+    { id: 'market-sol', name: 'Mercado Sol', region: 'Bairro', created_at: '2026-08-20T09:00:00.000Z' },
+    { id: 'assai', name: 'Assai', region: 'Atacado', created_at: '2026-08-20T09:05:00.000Z' },
+    { id: 'online', name: 'Online', region: 'Internet', created_at: '2026-08-20T09:10:00.000Z' },
+  ],
+  products: [
+    {
+      id: 'arroz-5kg',
+      name: 'Arroz 5 kg',
+      category: 'Mercearia',
+      last_price: 28.9,
+      last_store: 'Assai',
+      last_purchase_date: '2026-08-12',
+      created_at: '2026-08-20T09:20:00.000Z',
+    },
+    {
+      id: 'feijao-1kg',
+      name: 'Feijao carioca 1 kg',
+      category: 'Mercearia',
+      last_price: 8.39,
+      last_store: 'Assai',
+      last_purchase_date: '2026-08-10',
+      created_at: '2026-08-20T09:22:00.000Z',
+    },
+    {
+      id: 'sabao-liquido',
+      name: 'Sabao liquido',
+      category: 'Limpeza',
+      last_price: 23.5,
+      last_store: 'Mercado Sol',
+      last_purchase_date: '2026-08-04',
+      created_at: '2026-08-20T09:25:00.000Z',
+    },
+  ],
+  shoppingItems: [
+    { id: 'item-arroz', product_id: 'arroz-5kg', quantity: 2, status: 'pending', created_at: '2026-08-28T08:00:00.000Z' },
+    { id: 'item-feijao', product_id: 'feijao-1kg', quantity: 4, status: 'pending', created_at: '2026-08-28T08:10:00.000Z' },
+    { id: 'item-sabao', product_id: 'sabao-liquido', quantity: 2, status: 'pending', created_at: '2026-08-28T08:20:00.000Z' },
+  ],
+  quotes: [
+    {
+      id: 'quote-arroz-1',
+      shopping_item_id: 'item-arroz',
+      establishment: 'Assai',
+      price: 27.9,
+      shipping: 0,
+      source: 'physical',
+      quoted_at: '2026-08-28',
+      note: 'Preco de atacado',
+    },
+    {
+      id: 'quote-arroz-2',
+      shopping_item_id: 'item-arroz',
+      establishment: 'Mercado Sol',
+      price: 25.99,
+      shipping: 0,
+      source: 'physical',
+      quoted_at: '2026-08-28',
+      note: 'Campanha da semana',
+    },
+    {
+      id: 'quote-feijao-1',
+      shopping_item_id: 'item-feijao',
+      establishment: 'Mercado Sol',
+      price: 7.49,
+      shipping: 0,
+      source: 'physical',
+      quoted_at: '2026-08-28',
+      note: 'Oferta de quarta',
+    },
+    {
+      id: 'quote-feijao-2',
+      shopping_item_id: 'item-feijao',
+      establishment: 'Online',
+      price: 6.99,
+      shipping: 4.5,
+      source: 'online',
+      quoted_at: '2026-08-28',
+      note: 'Frete proporcional',
+    },
+  ],
+  campaigns: [
+    { id: 'camp-sol-horti', supermarket_id: 'market-sol', weekday: 1, category: 'Hortifruti', description: 'Frutas, verduras e legumes com maior giro.', active: true },
+    { id: 'camp-assai-mercearia', supermarket_id: 'assai', weekday: 3, category: 'Mercearia', description: 'Arroz, feijao, cafe e oleo costumam compensar.', active: true },
+    { id: 'camp-online-limpeza', supermarket_id: 'online', weekday: 5, category: 'Limpeza', description: 'Comparar kits, frete e cashback antes de fechar.', active: true },
+  ],
+  purchases: [],
+}
+
+const makeId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`)
+const today = () => new Date().toISOString().slice(0, 10)
+const normalizeText = (value) => value.trim().replace(/\s+/g, ' ')
+const toNumber = (value, fallback = 0) => {
+  const number = Number(String(value).replace(',', '.'))
+  return Number.isFinite(number) ? number : fallback
+}
+const money = (value) =>
+  Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+function safeJson(value, fallback) {
+  try {
+    return value ? JSON.parse(value) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function quoteEffectivePrice(quote) {
+  return Number(quote.price || 0) + Number(quote.shipping || 0)
+}
+
+function getRecommendation(item, quotes, product) {
+  const itemQuotes = quotes
+    .filter((quote) => quote.shopping_item_id === item.id)
+    .sort((a, b) => quoteEffectivePrice(a) - quoteEffectivePrice(b))
+
+  if (itemQuotes.length < 2) {
+    return {
+      status: 'missing',
+      message: `Faltam ${2 - itemQuotes.length} cotacao(oes)`,
+      quote: null,
+      saving: 0,
+    }
+  }
+
+  const best = itemQuotes[0]
+  const lastPrice = Number(product?.last_price || 0)
+  const saving = lastPrice > 0 ? (lastPrice - quoteEffectivePrice(best)) * item.quantity : 0
+
+  return {
+    status: 'ready',
+    message: `${best.establishment} por ${money(quoteEffectivePrice(best))}`,
+    quote: best,
+    saving,
+  }
+}
+
+function isNearCampaign(campaign) {
+  const todayWeekday = new Date().getDay()
+  const diff = (Number(campaign.weekday) - todayWeekday + 7) % 7
+  return diff <= 2
+}
 
 export default function App() {
   const [session, setSession] = useState(null)
+  const [isLocalSession, setIsLocalSession] = useState(false)
+  const [activeTab, setActiveTab] = useState('lista')
   const [email, setEmail] = useState('')
-  const [item, setItem] = useState('')
-  const [quantidade, setQuantidade] = useState('')
-  const [preco1, setPreco1] = useState('')
-  const [preco2, setPreco2] = useState('')
-  const [preco3, setPreco3] = useState('')
-  const [compras, setCompras] = useState([])
-  const [erro, setErro] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [data, setData] = useState(EMPTY_STATE)
+  const [productForm, setProductForm] = useState({
+    name: '',
+    category: '',
+    quantity: 1,
+    last_price: '',
+    last_store: '',
+    last_purchase_date: today(),
+  })
+  const [quoteForm, setQuoteForm] = useState({
+    shopping_item_id: '',
+    establishment: '',
+    price: '',
+    shipping: '',
+    source: 'physical',
+    quoted_at: today(),
+    note: '',
+  })
+  const [marketForm, setMarketForm] = useState({
+    name: '',
+    region: '',
+    weekday: 1,
+    category: '',
+    description: '',
+  })
+
+  const enrichedItems = useMemo(() => {
+    return data.shoppingItems.map((item) => {
+      const product = data.products.find((entry) => entry.id === item.product_id)
+      const itemQuotes = data.quotes.filter((quote) => quote.shopping_item_id === item.id)
+      return { ...item, product, quotes: itemQuotes, recommendation: getRecommendation(item, data.quotes, product) }
+    })
+  }, [data])
+
+  const dashboard = useMemo(() => {
+    const pendingItems = enrichedItems.filter((item) => item.status !== 'purchased')
+    const readyItems = pendingItems.filter((item) => item.recommendation.status === 'ready')
+    const missingQuotes = pendingItems.filter((item) => item.recommendation.status === 'missing')
+    const totalSaving = readyItems.reduce((sum, item) => sum + Math.max(item.recommendation.saving, 0), 0)
+    const onlineWins = readyItems.filter((item) => item.recommendation.quote?.source === 'online')
+
+    return { pendingItems, readyItems, missingQuotes, totalSaving, onlineWins }
+  }, [enrichedItems])
+
+  const campaignSuggestions = useMemo(() => {
+    return data.campaigns
+      .filter((campaign) => campaign.active && isNearCampaign(campaign))
+      .map((campaign) => ({
+        ...campaign,
+        supermarket: data.supermarkets.find((market) => market.id === campaign.supermarket_id),
+      }))
+  }, [data.campaigns, data.supermarkets])
+
+  function persistLocal(nextData) {
+    setData(nextData)
+    if (isLocalSession) localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(nextData))
+  }
+
+  const startLocalMode = useCallback(() => {
+    setIsLocalSession(true)
+    setSession({ user: { id: LOCAL_USER_ID, email: email || 'teste@local' } })
+  }, [email])
+
+  async function loadRemoteData() {
+    const responses = await Promise.all([
+      supabase.from('supermercados').select('*').order('name'),
+      supabase.from('produtos').select('*').order('name'),
+      supabase.from('lista_compras').select('*').order('created_at', { ascending: false }),
+      supabase.from('cotacoes').select('*').order('quoted_at', { ascending: false }),
+      supabase.from('campanhas_semanais').select('*').order('weekday'),
+      supabase.from('compras_realizadas').select('*').order('purchased_at', { ascending: false }),
+    ])
+    const failed = responses.find((response) => response.error)
+    if (failed) throw failed.error
+
+    return {
+      supermarkets: responses[0].data || [],
+      products: responses[1].data || [],
+      shoppingItems: responses[2].data || [],
+      quotes: responses[3].data || [],
+      campaigns: responses[4].data || [],
+      purchases: responses[5].data || [],
+    }
+  }
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session)
+    supabase.auth.getSession().then(({ data: authData }) => {
+      if (authData.session) setSession(authData.session)
     })
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (nextSession) {
+        setIsLocalSession(false)
+        setSession(nextSession)
+      }
     })
 
     return () => listener.subscription.unsubscribe()
@@ -30,393 +272,433 @@ export default function App() {
   useEffect(() => {
     if (!session) return
 
-    if (session.user.id === LOCAL_USER_ID) {
-      const saved = localStorage.getItem(LOCAL_COMPRAS_KEY)
-      queueMicrotask(() => {
-        setCompras(saved ? JSON.parse(saved) : [])
-      })
-      return
-    }
+    async function load() {
+      setLoading(true)
+      setError('')
 
-    async function carregarComprasIniciais() {
-      try {
-        setErro('')
-        const { data, error } = await supabase
-          .from('compras')
-          .select('*')
-          .order('created_at', { ascending: false })
-
-        if (error) setErro(error.message)
-        else setCompras(data)
-      } catch {
-        setErro('Nao foi possivel carregar a lista. Confira a conexao com o Supabase.')
+      if (isLocalSession || session.user.id === LOCAL_USER_ID) {
+        await Promise.resolve()
+        setData(safeJson(localStorage.getItem(LOCAL_STATE_KEY), null) || SAMPLE_STATE)
+        setLoading(false)
+        return
       }
+
+      const remoteState = await loadRemoteData()
+      setData(remoteState)
+      setLoading(false)
     }
 
-    carregarComprasIniciais()
-  }, [session])
-
-  const isLocalSession = session?.user?.id === LOCAL_USER_ID
-
-  function carregarComprasLocais() {
-    const saved = localStorage.getItem(LOCAL_COMPRAS_KEY)
-    setCompras(saved ? JSON.parse(saved) : [])
-  }
-
-  function salvarComprasLocais(nextCompras) {
-    localStorage.setItem(LOCAL_COMPRAS_KEY, JSON.stringify(nextCompras))
-    setCompras(nextCompras)
-  }
-
-  function entrarModoTeste() {
-    setSession({
-      user: {
-        id: LOCAL_USER_ID,
-        email: email || 'teste@local',
-      },
+    load().catch(() => {
+      setError('Nao foi possivel conectar ao Supabase. Usando modo teste local.')
+      startLocalMode()
+      setLoading(false)
     })
-  }
+  }, [session, isLocalSession, startLocalMode])
 
-  async function cadastrar() {
+  async function login() {
+    setLoading(true)
+    setError('')
+    setNotice('')
+
     try {
-      setErro('')
-      const { error } = await supabase.auth.signUp({
-        email,
-        password: import.meta.env.VITE_TEST_PASSWORD || 'compras123',
-      })
-
-      if (error) setErro(error.message)
-      else alert('Cadastro criado. Verifique seu email se o Supabase pedir confirmação.')
+      const { error: authError } = await supabase.auth.signInWithPassword({ email, password: TEST_PASSWORD })
+      if (authError) setError(authError.message)
     } catch {
-      setErro('Supabase indisponivel. Voce entrou em modo teste local.')
-      entrarModoTeste()
+      setNotice('Supabase indisponivel. Voce entrou em modo teste local.')
+      startLocalMode()
+    } finally {
+      setLoading(false)
     }
   }
 
-  async function entrar() {
-    try {
-      setErro('')
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password: import.meta.env.VITE_TEST_PASSWORD || 'compras123',
-      })
+  async function signup() {
+    setLoading(true)
+    setError('')
+    setNotice('')
 
-      if (error) setErro(error.message)
+    try {
+      const { error: authError } = await supabase.auth.signUp({ email, password: TEST_PASSWORD })
+      if (authError) setError(authError.message)
+      else setNotice('Cadastro criado. Confira seu email se o Supabase pedir confirmacao.')
     } catch {
-      setErro('Supabase indisponivel. Voce entrou em modo teste local.')
-      entrarModoTeste()
+      setNotice('Supabase indisponivel. Voce entrou em modo teste local.')
+      startLocalMode()
+    } finally {
+      setLoading(false)
     }
   }
 
-  async function sair() {
+  async function logout() {
     if (isLocalSession) {
       setSession(null)
-      setCompras([])
+      setData(EMPTY_STATE)
+      setIsLocalSession(false)
       return
     }
 
     await supabase.auth.signOut()
+    setSession(null)
+    setData(EMPTY_STATE)
   }
 
-  async function carregarCompras() {
-    if (isLocalSession) {
-      carregarComprasLocais()
-      return
-    }
+  async function saveData(nextData, remoteAction) {
+    setError('')
+    persistLocal(nextData)
 
-    try {
-      setErro('')
-      const { data, error } = await supabase
-        .from('compras')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (error) setErro(error.message)
-      else setCompras(data)
-    } catch {
-      setErro('Nao foi possivel carregar a lista. Confira a conexao com o Supabase.')
-    }
-  }
-
-  async function adicionarItem() {
-    if (!item.trim()) return
-
-    let qty = parseInt(quantidade, 10)
-    if (!Number.isFinite(qty) || qty <= 0) qty = 1
-
-    const prices = [preco1, preco2, preco3].map((value) => {
-      const normalized = value.replace(',', '.').trim()
-      const number = parseFloat(normalized)
-      return Number.isFinite(number) && number >= 0 ? number : null
-    })
-
-    const [price1, price2, price3] = prices
-
-    if (isLocalSession) {
-      salvarComprasLocais([
-        {
-          id: crypto.randomUUID(),
-          item,
-          quantidade: qty,
-          preco_1: price1,
-          preco_2: price2,
-          preco_3: price3,
-          comprado: false,
-          in_cart: false,
-          created_at: new Date().toISOString(),
-        },
-        ...compras,
-      ])
-      setItem('')
-      setQuantidade('')
-      setPreco1('')
-      setPreco2('')
-      setPreco3('')
-      return
-    }
-
-    try {
-      setErro('')
-      const { error } = await supabase.from('compras').insert({
-        item,
-        quantidade: qty,
-        preco_1: price1,
-        preco_2: price2,
-        preco_3: price3,
-        user_id: session.user.id,
-      })
-
-      if (error) setErro(error.message)
-      else {
-        setItem('')
-        setQuantidade('')
-        setPreco1('')
-        setPreco2('')
-        setPreco3('')
-        carregarCompras()
+    if (!isLocalSession) {
+      try {
+        const { error: remoteError } = await remoteAction()
+        if (remoteError) throw remoteError
+      } catch (err) {
+        setError(err.message || 'Nao foi possivel salvar no Supabase.')
       }
-    } catch {
-      setErro('Nao foi possivel adicionar o item. Confira a conexao com o Supabase.')
     }
   }
 
-  async function alternarComprado(compra) {
-    if (isLocalSession) {
-      salvarComprasLocais(
-        compras.map((item) =>
-          item.id === compra.id ? { ...item, comprado: !item.comprado } : item
-        )
-      )
-      return
+  async function addProductToList(event) {
+    event.preventDefault()
+    const name = normalizeText(productForm.name)
+    if (!name) return
+
+    const product = {
+      id: makeId(),
+      name,
+      category: normalizeText(productForm.category) || 'Geral',
+      last_price: toNumber(productForm.last_price),
+      last_store: normalizeText(productForm.last_store),
+      last_purchase_date: productForm.last_purchase_date || null,
+      user_id: session.user.id,
+      created_at: new Date().toISOString(),
+    }
+    const item = {
+      id: makeId(),
+      product_id: product.id,
+      quantity: Math.max(1, toNumber(productForm.quantity, 1)),
+      status: 'pending',
+      user_id: session.user.id,
+      created_at: new Date().toISOString(),
     }
 
-    try {
-      setErro('')
-      const { error } = await supabase
-        .from('compras')
-        .update({ comprado: !compra.comprado })
-        .eq('id', compra.id)
+    await saveData(
+      { ...data, products: [product, ...data.products], shoppingItems: [item, ...data.shoppingItems] },
+      async () => {
+        const productInsert = await supabase.from('produtos').insert(product)
+        if (productInsert.error) return productInsert
+        return supabase.from('lista_compras').insert(item)
+      },
+    )
 
-      if (error) setErro(error.message)
-      else carregarCompras()
-    } catch {
-      setErro('Nao foi possivel atualizar o item. Confira a conexao com o Supabase.')
-    }
+    setProductForm({ name: '', category: '', quantity: 1, last_price: '', last_store: '', last_purchase_date: today() })
   }
 
-  async function alternarCarrinho(compra) {
-    if (isLocalSession) {
-      salvarComprasLocais(
-        compras.map((item) =>
-          item.id === compra.id ? { ...item, in_cart: !item.in_cart } : item
-        )
-      )
+  async function addQuote(event) {
+    event.preventDefault()
+    const selectedItem = data.shoppingItems.find((item) => item.id === quoteForm.shopping_item_id)
+    if (!selectedItem) return
+
+    const currentQuotes = data.quotes.filter((quote) => quote.shopping_item_id === quoteForm.shopping_item_id)
+    if (currentQuotes.length >= 3) {
+      setError('Cada item pode ter no maximo 3 cotacoes ativas.')
       return
     }
 
-    try {
-      setErro('')
-      const { error } = await supabase
-        .from('compras')
-        .update({ in_cart: !compra.in_cart })
-        .eq('id', compra.id)
-
-      if (error) setErro(error.message)
-      else carregarCompras()
-    } catch {
-      setErro('Nao foi possivel atualizar o carrinho. Confira a conexao com o Supabase.')
+    const quote = {
+      id: makeId(),
+      shopping_item_id: quoteForm.shopping_item_id,
+      establishment: normalizeText(quoteForm.establishment),
+      price: toNumber(quoteForm.price),
+      shipping: quoteForm.source === 'online' ? toNumber(quoteForm.shipping) : 0,
+      source: quoteForm.source,
+      quoted_at: quoteForm.quoted_at || today(),
+      note: normalizeText(quoteForm.note),
+      user_id: session.user.id,
     }
+    if (!quote.establishment || quote.price <= 0) return
+
+    await saveData({ ...data, quotes: [quote, ...data.quotes] }, () => supabase.from('cotacoes').insert(quote))
+    setQuoteForm({ shopping_item_id: selectedItem.id, establishment: '', price: '', shipping: '', source: 'physical', quoted_at: today(), note: '' })
   }
 
-  async function excluirItem(id) {
-    if (isLocalSession) {
-      salvarComprasLocais(compras.filter((item) => item.id !== id))
+  async function addMarketAndCampaign(event) {
+    event.preventDefault()
+    const marketName = normalizeText(marketForm.name)
+    if (!marketName) return
+
+    const market = {
+      id: makeId(),
+      name: marketName,
+      region: normalizeText(marketForm.region),
+      user_id: session.user.id,
+      created_at: new Date().toISOString(),
+    }
+    const campaign = {
+      id: makeId(),
+      supermarket_id: market.id,
+      weekday: Number(marketForm.weekday),
+      category: normalizeText(marketForm.category) || 'Geral',
+      description: normalizeText(marketForm.description),
+      active: true,
+      user_id: session.user.id,
+    }
+
+    await saveData(
+      { ...data, supermarkets: [market, ...data.supermarkets], campaigns: [campaign, ...data.campaigns] },
+      async () => {
+        const marketInsert = await supabase.from('supermercados').insert(market)
+        if (marketInsert.error) return marketInsert
+        return supabase.from('campanhas_semanais').insert(campaign)
+      },
+    )
+    setMarketForm({ name: '', region: '', weekday: 1, category: '', description: '' })
+  }
+
+  async function markPurchased(item) {
+    const product = data.products.find((entry) => entry.id === item.product_id)
+    const recommendation = getRecommendation(item, data.quotes, product)
+    if (!recommendation.quote) {
+      setError('Adicione pelo menos 2 cotacoes antes de registrar a compra.')
       return
     }
 
-    try {
-      setErro('')
-      const { error } = await supabase
-        .from('compras')
-        .delete()
-        .eq('id', id)
-
-      if (error) setErro(error.message)
-      else carregarCompras()
-    } catch {
-      setErro('Nao foi possivel excluir o item. Confira a conexao com o Supabase.')
+    const purchase = {
+      id: makeId(),
+      product_id: item.product_id,
+      shopping_item_id: item.id,
+      quantity: item.quantity,
+      paid_price: quoteEffectivePrice(recommendation.quote),
+      establishment: recommendation.quote.establishment,
+      purchased_at: today(),
+      user_id: session.user.id,
     }
+    const updatedProduct = {
+      ...product,
+      last_price: purchase.paid_price,
+      last_store: purchase.establishment,
+      last_purchase_date: purchase.purchased_at,
+    }
+    const nextData = {
+      ...data,
+      products: data.products.map((entry) => (entry.id === product.id ? updatedProduct : entry)),
+      shoppingItems: data.shoppingItems.map((entry) => (entry.id === item.id ? { ...entry, status: 'purchased' } : entry)),
+      purchases: [purchase, ...data.purchases],
+    }
+
+    await saveData(nextData, async () => {
+      const productUpdate = await supabase
+        .from('produtos')
+        .update({
+          last_price: updatedProduct.last_price,
+          last_store: updatedProduct.last_store,
+          last_purchase_date: updatedProduct.last_purchase_date,
+        })
+        .eq('id', product.id)
+      if (productUpdate.error) return productUpdate
+
+      const itemUpdate = await supabase.from('lista_compras').update({ status: 'purchased' }).eq('id', item.id)
+      if (itemUpdate.error) return itemUpdate
+      return supabase.from('compras_realizadas').insert(purchase)
+    })
   }
 
   if (!session) {
     return (
-      <div style={{ padding: 30, maxWidth: 400, margin: 'auto' }}>
-        <h1>Lista de Compras</h1>
+      <main className="auth-page">
+        <section className="auth-panel">
+          <p className="eyebrow">Compras domesticas</p>
+          <h1>Economize escolhendo onde comprar cada item</h1>
+          <p>Controle campanhas, ultimos precos e cotacoes para proteger o dinheiro da casa.</p>
 
-        <input
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          style={{ display: 'block', width: '100%', marginBottom: 10, padding: 10 }}
-        />
+          <label>
+            Email
+            <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="familia@email.com" type="email" />
+          </label>
 
-        {erro && (
-          <p style={{ color: '#b00020', marginBottom: 10 }}>
-            {erro}
-          </p>
-        )}
+          {error && <p className="message error">{error}</p>}
+          {notice && <p className="message success">{notice}</p>}
 
-        <button onClick={entrar} style={{ marginRight: 10 }}>
-          Entrar
-        </button>
-
-        <button onClick={cadastrar}>
-          Cadastrar
-        </button>
-      </div>
+          <div className="actions">
+            <button type="button" onClick={login} disabled={loading}>Entrar</button>
+            <button type="button" className="secondary" onClick={signup} disabled={loading}>Cadastrar</button>
+          </div>
+        </section>
+      </main>
     )
   }
 
   return (
-    <div style={{ padding: 30, maxWidth: 500, margin: 'auto' }}>
-      <h1>Minha Lista de Compras</h1>
+    <main className="app-shell">
+      <header className="app-header">
+        <div>
+          <p className="eyebrow">Controle inteligente</p>
+          <h1>Compras da Casa</h1>
+          <p>{session.user.email}</p>
+        </div>
+        <button type="button" className="secondary" onClick={logout}>Sair</button>
+      </header>
 
-      <p>Logado como: {session.user.email}</p>
-
-      <button onClick={sair}>Sair</button>
-
-      {erro && (
-        <p style={{ color: '#b00020', marginTop: 10 }}>
-          {erro}
-        </p>
+      {(error || notice || isLocalSession) && (
+        <section className="status-stack">
+          {isLocalSession && <p className="message warning">Modo teste local ativo. Os dados ficam neste navegador.</p>}
+          {notice && <p className="message success">{notice}</p>}
+          {error && <p className="message error">{error}</p>}
+        </section>
       )}
 
-      <hr />
+      <section className="summary-grid">
+        <article className="summary-card"><span>Economia estimada</span><strong>{money(dashboard.totalSaving)}</strong></article>
+        <article className="summary-card"><span>Itens para comprar</span><strong>{dashboard.pendingItems.length}</strong></article>
+        <article className="summary-card"><span>Sem cotacao suficiente</span><strong>{dashboard.missingQuotes.length}</strong></article>
+        <article className="summary-card"><span>Internet vantajosa</span><strong>{dashboard.onlineWins.length}</strong></article>
+      </section>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
-        <input
-          placeholder="Digite um item"
-          value={item}
-          onChange={(e) => setItem(e.target.value)}
-          style={{ flex: 1, minWidth: 150, padding: 10 }}
-        />
+      <nav className="tabbar" aria-label="Areas do sistema">
+        {[
+          ['lista', 'Lista'],
+          ['cotacoes', 'Cotacoes'],
+          ['mercados', 'Mercados'],
+          ['historico', 'Historico'],
+        ].map(([id, label]) => (
+          <button key={id} type="button" className={activeTab === id ? 'active' : ''} onClick={() => setActiveTab(id)}>{label}</button>
+        ))}
+      </nav>
 
-        <input
-          placeholder="Quantidade"
-          type="number"
-          min={1}
-          value={quantidade}
-          onChange={(e) => setQuantidade(e.target.value)}
-          style={{ width: 100, padding: 10 }}
-        />
+      {loading && <p className="message">Carregando dados...</p>}
 
-        <input
-          placeholder="Preço 1"
-          type="number"
-          min={0}
-          step="0.01"
-          value={preco1}
-          onChange={(e) => setPreco1(e.target.value)}
-          style={{ width: 100, padding: 10 }}
-        />
+      {activeTab === 'lista' && (
+        <section className="workspace">
+          <form className="panel form-grid" onSubmit={addProductToList}>
+            <h2>Novo item</h2>
+            <label>Produto<input value={productForm.name} onChange={(event) => setProductForm({ ...productForm, name: event.target.value })} placeholder="Ex.: Arroz 5 kg" /></label>
+            <label>Categoria<input value={productForm.category} onChange={(event) => setProductForm({ ...productForm, category: event.target.value })} placeholder="Mercearia, limpeza..." /></label>
+            <label>Quantidade<input value={productForm.quantity} min="1" onChange={(event) => setProductForm({ ...productForm, quantity: event.target.value })} type="number" /></label>
+            <label>Ultimo preco pago<input value={productForm.last_price} onChange={(event) => setProductForm({ ...productForm, last_price: event.target.value })} placeholder="0,00" /></label>
+            <label>Ultimo estabelecimento<input value={productForm.last_store} onChange={(event) => setProductForm({ ...productForm, last_store: event.target.value })} placeholder="Mercado onde comprou" /></label>
+            <label>Data da ultima compra<input value={productForm.last_purchase_date} onChange={(event) => setProductForm({ ...productForm, last_purchase_date: event.target.value })} type="date" /></label>
+            <button type="submit">Adicionar a lista</button>
+          </form>
 
-        <input
-          placeholder="Preço 2"
-          type="number"
-          min={0}
-          step="0.01"
-          value={preco2}
-          onChange={(e) => setPreco2(e.target.value)}
-          style={{ width: 100, padding: 10 }}
-        />
+          <section className="panel">
+            <h2>Lista de compras</h2>
+            <div className="item-list">
+              {enrichedItems.length === 0 && <p className="empty">Adicione o primeiro item para iniciar as cotacoes.</p>}
+              {enrichedItems.map((item) => (
+                <article key={item.id} className="shopping-card">
+                  <div>
+                    <strong>{item.product?.name}</strong>
+                    <p>{item.quantity} un. | Ultimo: {money(item.product?.last_price)} em {item.product?.last_store || 'sem registro'}</p>
+                  </div>
+                  <span className={`pill ${item.recommendation.status}`}>{item.recommendation.message}</span>
+                  {item.recommendation.status === 'ready' && <button type="button" onClick={() => markPurchased(item)}>Registrar compra</button>}
+                </article>
+              ))}
+            </div>
+          </section>
+        </section>
+      )}
 
-        <input
-          placeholder="Preço 3"
-          type="number"
-          min={0}
-          step="0.01"
-          value={preco3}
-          onChange={(e) => setPreco3(e.target.value)}
-          style={{ width: 100, padding: 10 }}
-        />
+      {activeTab === 'cotacoes' && (
+        <section className="workspace">
+          <form className="panel form-grid" onSubmit={addQuote}>
+            <h2>Nova cotacao</h2>
+            <label>
+              Item da lista
+              <select value={quoteForm.shopping_item_id} onChange={(event) => setQuoteForm({ ...quoteForm, shopping_item_id: event.target.value })}>
+                <option value="">Selecione</option>
+                {enrichedItems.filter((item) => item.status !== 'purchased').map((item) => (
+                  <option key={item.id} value={item.id}>{item.product?.name} ({item.quotes.length}/3)</option>
+                ))}
+              </select>
+            </label>
+            <label>Estabelecimento<input value={quoteForm.establishment} onChange={(event) => setQuoteForm({ ...quoteForm, establishment: event.target.value })} placeholder="Mercado ou loja online" /></label>
+            <label>
+              Origem
+              <select value={quoteForm.source} onChange={(event) => setQuoteForm({ ...quoteForm, source: event.target.value })}>
+                <option value="physical">Supermercado fisico</option>
+                <option value="online">Internet</option>
+              </select>
+            </label>
+            <label>Preco<input value={quoteForm.price} onChange={(event) => setQuoteForm({ ...quoteForm, price: event.target.value })} placeholder="0,00" /></label>
+            <label>Frete<input value={quoteForm.shipping} onChange={(event) => setQuoteForm({ ...quoteForm, shipping: event.target.value })} placeholder="0,00" disabled={quoteForm.source !== 'online'} /></label>
+            <label>Data<input value={quoteForm.quoted_at} onChange={(event) => setQuoteForm({ ...quoteForm, quoted_at: event.target.value })} type="date" /></label>
+            <label className="wide">Observacao<input value={quoteForm.note} onChange={(event) => setQuoteForm({ ...quoteForm, note: event.target.value })} placeholder="Campanha, app, atacado, cupom..." /></label>
+            <button type="submit">Salvar cotacao</button>
+          </form>
 
-        <button onClick={adicionarItem}>
-          Adicionar
-        </button>
-      </div>
+          <section className="panel">
+            <h2>Comparativo</h2>
+            <div className="quote-groups">
+              {enrichedItems.map((item) => (
+                <article key={item.id} className="quote-card">
+                  <div className="quote-header"><strong>{item.product?.name}</strong><span>{item.quotes.length}/3 cotacoes</span></div>
+                  {item.quotes.length === 0 && <p className="empty">Nenhuma cotacao registrada.</p>}
+                  {[...item.quotes].sort((a, b) => quoteEffectivePrice(a) - quoteEffectivePrice(b)).map((quote, index) => (
+                    <div key={quote.id} className={index === 0 ? 'quote best' : 'quote'}>
+                      <div><strong>{quote.establishment}</strong><p>{quote.source === 'online' ? 'Internet' : 'Fisico'} | {quote.note || 'sem observacao'}</p></div>
+                      <strong>{money(quoteEffectivePrice(quote))}</strong>
+                    </div>
+                  ))}
+                </article>
+              ))}
+            </div>
+          </section>
+        </section>
+      )}
 
-      <ul>
-        {compras.map((compra) => {
-          const prices = [compra.preco_1, compra.preco_2, compra.preco_3].filter(
-            (value) => value != null
-          )
-          const bestPrice = prices.length ? Math.min(...prices) : null
+      {activeTab === 'mercados' && (
+        <section className="workspace">
+          <form className="panel form-grid" onSubmit={addMarketAndCampaign}>
+            <h2>Mercado e campanha</h2>
+            <label>Supermercado<input value={marketForm.name} onChange={(event) => setMarketForm({ ...marketForm, name: event.target.value })} placeholder="Nome do mercado" /></label>
+            <label>Regiao<input value={marketForm.region} onChange={(event) => setMarketForm({ ...marketForm, region: event.target.value })} placeholder="Bairro, cidade ou online" /></label>
+            <label>
+              Dia fixo
+              <select value={marketForm.weekday} onChange={(event) => setMarketForm({ ...marketForm, weekday: event.target.value })}>
+                {DAYS.map((day, index) => <option key={day} value={index}>{day}</option>)}
+              </select>
+            </label>
+            <label>Categoria<input value={marketForm.category} onChange={(event) => setMarketForm({ ...marketForm, category: event.target.value })} placeholder="Hortifruti, limpeza..." /></label>
+            <label className="wide">Descricao<input value={marketForm.description} onChange={(event) => setMarketForm({ ...marketForm, description: event.target.value })} placeholder="O que costuma valer a pena nesse dia" /></label>
+            <button type="submit">Salvar campanha</button>
+          </form>
 
-          return (
-            <li key={compra.id} style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <input
-                  type="checkbox"
-                  checked={compra.in_cart ?? false}
-                  onChange={() => alternarCarrinho(compra)}
-                />
-                No carrinho
-              </label>
+          <section className="panel">
+            <h2>Campanhas semanais</h2>
+            {campaignSuggestions.length > 0 && (
+              <div className="highlight">Cotar em breve: {campaignSuggestions.map((campaign) => `${campaign.category} no ${campaign.supermarket?.name}`).join(', ')}</div>
+            )}
+            <div className="campaign-list">
+              {data.campaigns.map((campaign) => {
+                const market = data.supermarkets.find((entry) => entry.id === campaign.supermarket_id)
+                return (
+                  <article key={campaign.id} className="campaign-card">
+                    <span>{DAYS[campaign.weekday]}</span>
+                    <div><strong>{campaign.category} | {market?.name}</strong><p>{campaign.description || market?.region || 'Sem detalhe informado'}</p></div>
+                  </article>
+                )
+              })}
+            </div>
+          </section>
+        </section>
+      )}
 
-              <div style={{ flex: 1 }}>
-                <span
-                  onClick={() => alternarComprado(compra)}
-                  style={{
-                    cursor: 'pointer',
-                    textDecoration: compra.comprado ? 'line-through' : 'none',
-                  }}
-                >
-                  {compra.item}
-                  <span style={{ fontSize: 12, color: '#666', marginLeft: 8 }}>
-                    ({compra.quantidade ?? 1})
-                  </span>
-                </span>
-
-                <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-                  Preços: {compra.preco_1 != null ? `R$ ${Number(compra.preco_1).toFixed(2)}` : '-'} / {compra.preco_2 != null ? `R$ ${Number(compra.preco_2).toFixed(2)}` : '-'} / {compra.preco_3 != null ? `R$ ${Number(compra.preco_3).toFixed(2)}` : '-'}
-                  {bestPrice != null && (
-                    <span style={{ marginLeft: 12 }}>
-                      Melhor: R$ {Number(bestPrice).toFixed(2)}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <button
-                onClick={() => excluirItem(compra.id)}
-                style={{ marginLeft: 10 }}
-              >
-                Excluir
-              </button>
-            </li>
-          )
-        })}
-      </ul>
-    </div>
+      {activeTab === 'historico' && (
+        <section className="panel">
+          <h2>Historico de compras</h2>
+          {data.purchases.length === 0 && <p className="empty">Quando uma compra for registrada, ela aparecera aqui e atualizara o ultimo preco do produto.</p>}
+          <div className="history-list">
+            {data.purchases.map((purchase) => {
+              const product = data.products.find((entry) => entry.id === purchase.product_id)
+              return (
+                <article key={purchase.id} className="history-card">
+                  <strong>{product?.name}</strong>
+                  <span>{money(purchase.paid_price)}</span>
+                  <p>{purchase.quantity} un. em {purchase.establishment} | {purchase.purchased_at}</p>
+                </article>
+              )
+            })}
+          </div>
+        </section>
+      )}
+    </main>
   )
 }
