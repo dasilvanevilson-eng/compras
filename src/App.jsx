@@ -673,15 +673,11 @@ export default function App() {
             <label>Categoria<input value={productForm.category} onChange={(event) => setProductForm({ ...productForm, category: event.target.value })} placeholder="Mercearia, limpeza..." /></label>
             <label>
               Unidade
-              <select value={productForm.unit} onChange={(event) => setProductForm({ ...productForm, unit: event.target.value })}>
-                <option value="un">Unidade</option>
-                <option value="kg">Kg</option>
-                <option value="g">Grama</option>
-                <option value="pc">Pacote</option>
-                <option value="cx">Caixa</option>
-                <option value="lt">Litro</option>
-                <option value="ml">Mililitro</option>
-              </select>
+              <input
+                value={productForm.unit}
+                onChange={(event) => setProductForm({ ...productForm, unit: event.target.value })}
+                placeholder="Ex.: kg, pc, un, fardo"
+              />
             </label>
             <label>Quantidade<input value={productForm.quantity} min="1" onChange={(event) => setProductForm({ ...productForm, quantity: event.target.value })} type="number" /></label>
             <label>Ultimo preco pago<input value={productForm.last_price} onChange={(event) => setProductForm({ ...productForm, last_price: event.target.value })} placeholder="0,00" /></label>
