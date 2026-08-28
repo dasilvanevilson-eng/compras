@@ -28,6 +28,7 @@ const SAMPLE_STATE = {
       id: 'arroz-5kg',
       name: 'Arroz 5 kg',
       category: 'Mercearia',
+      unit: 'pc',
       last_price: 28.9,
       last_store: 'Assai',
       last_purchase_date: '2026-08-12',
@@ -37,6 +38,7 @@ const SAMPLE_STATE = {
       id: 'feijao-1kg',
       name: 'Feijao carioca 1 kg',
       category: 'Mercearia',
+      unit: 'pc',
       last_price: 8.39,
       last_store: 'Assai',
       last_purchase_date: '2026-08-10',
@@ -46,6 +48,7 @@ const SAMPLE_STATE = {
       id: 'sabao-liquido',
       name: 'Sabao liquido',
       category: 'Limpeza',
+      unit: 'un',
       last_price: 23.5,
       last_store: 'Mercado Sol',
       last_purchase_date: '2026-08-04',
@@ -174,6 +177,7 @@ export default function App() {
   const [productForm, setProductForm] = useState({
     name: '',
     category: '',
+    unit: 'un',
     quantity: 1,
     last_price: '',
     last_store: '',
@@ -369,6 +373,7 @@ export default function App() {
         ...data.products.find((product) => product.id === currentItem.product_id),
         name,
         category: normalizeText(productForm.category) || 'Geral',
+        unit: normalizeText(productForm.unit) || 'un',
         last_price: toNumber(productForm.last_price),
         last_store: normalizeText(productForm.last_store),
         last_purchase_date: productForm.last_purchase_date || null,
@@ -394,6 +399,7 @@ export default function App() {
             .update({
               name: updatedProduct.name,
               category: updatedProduct.category,
+              unit: updatedProduct.unit,
               last_price: updatedProduct.last_price,
               last_store: updatedProduct.last_store,
               last_purchase_date: updatedProduct.last_purchase_date,
@@ -417,6 +423,7 @@ export default function App() {
       id: makeId(),
       name,
       category: normalizeText(productForm.category) || 'Geral',
+      unit: normalizeText(productForm.unit) || 'un',
       last_price: toNumber(productForm.last_price),
       last_store: normalizeText(productForm.last_store),
       last_purchase_date: productForm.last_purchase_date || null,
@@ -445,7 +452,7 @@ export default function App() {
   }
 
   function resetProductForm() {
-    setProductForm({ name: '', category: '', quantity: 1, last_price: '', last_store: '', last_purchase_date: today() })
+    setProductForm({ name: '', category: '', unit: 'un', quantity: 1, last_price: '', last_store: '', last_purchase_date: today() })
   }
 
   function editShoppingItem(item) {
@@ -456,6 +463,7 @@ export default function App() {
     setProductForm({
       name: product.name,
       category: product.category,
+      unit: product.unit || 'un',
       quantity: item.quantity,
       last_price: product.last_price || '',
       last_store: product.last_store || '',
@@ -663,6 +671,18 @@ export default function App() {
             <h2>{editingItemId ? 'Editar item' : 'Novo item'}</h2>
             <label>Produto<input value={productForm.name} onChange={(event) => setProductForm({ ...productForm, name: event.target.value })} placeholder="Ex.: Arroz 5 kg" /></label>
             <label>Categoria<input value={productForm.category} onChange={(event) => setProductForm({ ...productForm, category: event.target.value })} placeholder="Mercearia, limpeza..." /></label>
+            <label>
+              Unidade
+              <select value={productForm.unit} onChange={(event) => setProductForm({ ...productForm, unit: event.target.value })}>
+                <option value="un">Unidade</option>
+                <option value="kg">Kg</option>
+                <option value="g">Grama</option>
+                <option value="pc">Pacote</option>
+                <option value="cx">Caixa</option>
+                <option value="lt">Litro</option>
+                <option value="ml">Mililitro</option>
+              </select>
+            </label>
             <label>Quantidade<input value={productForm.quantity} min="1" onChange={(event) => setProductForm({ ...productForm, quantity: event.target.value })} type="number" /></label>
             <label>Ultimo preco pago<input value={productForm.last_price} onChange={(event) => setProductForm({ ...productForm, last_price: event.target.value })} placeholder="0,00" /></label>
             <label>Ultimo estabelecimento<input value={productForm.last_store} onChange={(event) => setProductForm({ ...productForm, last_store: event.target.value })} placeholder="Mercado onde comprou" /></label>
@@ -690,7 +710,7 @@ export default function App() {
                 <article key={item.id} className="shopping-card">
                   <div>
                     <strong>{item.product?.name}</strong>
-                    <p>{item.quantity} un. | Ultimo: {money(item.product?.last_price)} em {item.product?.last_store || 'sem registro'}</p>
+                    <p>{item.quantity} {item.product?.unit || 'un'} | Ultimo: {money(item.product?.last_price)} em {item.product?.last_store || 'sem registro'}</p>
                   </div>
                   <span className={`pill ${item.recommendation.status}`}>{item.recommendation.message}</span>
                   <div className="card-actions">
@@ -801,7 +821,7 @@ export default function App() {
                 <article key={purchase.id} className="history-card">
                   <strong>{product?.name}</strong>
                   <span>{money(purchase.paid_price)}</span>
-                  <p>{purchase.quantity} un. em {purchase.establishment} | {purchase.purchased_at}</p>
+                  <p>{purchase.quantity} {product?.unit || 'un'} em {purchase.establishment} | {purchase.purchased_at}</p>
                 </article>
               )
             })}

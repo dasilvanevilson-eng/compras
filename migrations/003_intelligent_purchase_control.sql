@@ -12,6 +12,7 @@ create table if not exists produtos (
   user_id uuid not null references auth.users(id) on delete cascade,
   name text not null,
   category text not null default 'Geral',
+  unit text not null default 'un',
   last_price numeric(10, 2) not null default 0,
   last_store text,
   last_purchase_date date,
