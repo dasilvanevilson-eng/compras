@@ -780,7 +780,9 @@ export default function App() {
             <h2>Lista de compras</h2>
             <div className="item-list">
               {enrichedItems.length === 0 && <p className="empty">Adicione o primeiro item para iniciar as cotacoes.</p>}
-              {enrichedItems.map((item) => (
+              {[...enrichedItems]
+                .sort((a, b) => (a.product?.name || '').localeCompare(b.product?.name || ''))
+                .map((item) => (
                 <article key={item.id} className="shopping-card">
                   <div>
                     <strong>{item.product?.name}</strong>
