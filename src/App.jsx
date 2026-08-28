@@ -517,7 +517,13 @@ export default function App() {
     if (!quote.establishment || quote.price <= 0) return
 
     await saveData({ ...data, quotes: [quote, ...data.quotes] }, () => supabase.from('cotacoes').insert(quote))
-    setQuoteForm({ shopping_item_id: selectedItem.id, establishment: '', price: '', shipping: '', source: 'physical', quoted_at: today(), note: '' })
+    setQuoteForm({
+      ...quoteForm,
+      shopping_item_id: '',
+      price: '',
+      shipping: '',
+      note: '',
+    })
   }
 
   async function addMarketAndCampaign(event) {
